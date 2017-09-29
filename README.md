@@ -28,14 +28,14 @@ First let's encapsulate the functionality of our 'State' effect in a module:
 
 ```elixir
 defmodule State do
-  import Effects
+  import ElixirEffects
 
   defmodule Get do
-    Effects.defeffect
+    ElixirEffects.defeffect
   end
 
   defmodule Set do
-    Effects.defeffect [:value]
+    ElixirEffects.defeffect [:value]
   end
 
   def get, do: perform %Get{}
@@ -79,6 +79,8 @@ Well other than faking mutability where it otherwise does not exist, it is great
 ## How?
 
 This (ab)uses the process dictionary to be able to relatively efficiently emulate effects.  Individual effects are of course able to implement their effects however they wish, whether via another process, by accessing a database, or whatever other means they deem useful.
+
+A lot of the traditionally 'good' examples for effects are not really useful on the BEAM as the BEAM has such functionality built in, but could even duplicate the Actor system in effects if wanted.
 
 ## Monads?
 
