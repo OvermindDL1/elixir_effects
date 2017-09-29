@@ -40,15 +40,15 @@ defmodule ElixirEffectsTest do
       :never_returns = ElixirEffects.perform(%TestEffectField1{})
       assert :never_called = ElixirEffects.perform(%TestEffectVoid{})
     ) do
-      %TestEffectVoid{} -> {:return, 1}
+      state, %TestEffectVoid{} -> {:return, 1}
       state, %TestEffectVoidN{} -> {:return, state, 2}
-      %TestEffectField1{a_field: 42} -> {:raise, %ArgumentError{message: "should not be 42"}}
-      %TestEffectField1{} -> :done
+      state, %TestEffectField1{a_field: 42} -> {:raise, %ArgumentError{message: "should not be 42"}}
+      state, %TestEffectField1{} -> :done
     end
   end
 
 
-  # Test a 'State' effect
+  ## Test a 'State' effect
   defmodule State do
     import ElixirEffects
 
@@ -81,4 +81,69 @@ defmodule ElixirEffectsTest do
         6.28
       end
   end
+
+
+  # ## Although we do not have in-built continuations, if necessary they can be force-passed in by the effect:
+  # defmodule Sched do
+  #   import ElixirEffects
+  #
+  #   defeffect Fork, [:fun, :cont]
+  #   defeffect Yield, [:cont]
+  #
+  #   def fork(fun, cont), do: perform %Fork{fun: fun, cont: cont}
+  #   def yield(cont), do: perform %Yield{cont: cont}
+  #
+  #   def run(fun) do
+  #     run_effect :queue.new(),
+  #       (try(do: fun.(),
+  #       rescue: (e ->
+  #         IO.puts Exception.message(e)
+  #         nil),
+  #       catch: (
+  #         {:EffectsDone, _, _} = e -> throw e
+  #         e ->
+  #           IO.inspect {:thrown, e}
+  #           nil))
+  #       ) do
+  #       returned run_q, _value ->
+  #         :todo
+  #       run_q, %Yield{cont: cont} ->
+  #         case :queue.out(run_q) do
+  #           {:empty, ^run_q} -> {:continue, cont}
+  #           {{:value, next_cont}, run_q} ->
+  #             new_run_q = :queue.in(cont, run_q)
+  #             {:continue, new_run_q, next_cont}
+  #         end
+  #       run_q, %Fork{fun: fun, cont: cont} ->
+  #         # run_q = :queue.in(fun, run_q)
+  #         run_q = :queue.in(cont, run_q)
+  #         # {{:value, fun}, run_q} = :queue.out(run_q)
+  #         {:continue, run_q, fun}
+  #     end
+  #   end
+  # end
+  #
+  # def test_greenlet(id, depth) do
+  #   IO.puts "Starting number #{id}"
+  #   if depth > 0 do
+  #     IO.puts "Forking number #{id * 2 + 1}"
+  #     Sched.fork fn -> test_greenlet(id * 2 + 1, depth - 1) end, fn ->
+  #       IO.puts "Forking number #{id * 2 + 2}"
+  #       Sched.fork fn -> test_greenlet(id * 2 + 2, depth - 1) end, fn ->
+  #         IO.puts "Finishing number #{id}"
+  #       end
+  #     end
+  #   else
+  #     IO.puts "Yielding in number #{id}"
+  #     Sched.yield fn ->
+  #       IO.puts "Resumed number #{id}"
+  #       IO.puts "Finishing number #{id}"
+  #     end
+  #   end
+  # end
+  #
+  # test "Sched Effect" do
+  #   assert nil ==
+  #     Sched.run fn -> test_greenlet(0, 2) end
+  # end
 end

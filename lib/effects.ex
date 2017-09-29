@@ -30,6 +30,15 @@ defmodule ElixirEffects do
   end
 
 
+  defmacro defeffect(module, fields) do
+    quote do
+      defmodule unquote(module) do
+        ElixirEffects.defeffect(unquote(fields))
+      end
+    end
+  end
+
+
 
   @doc """
   Run an effect
@@ -61,6 +70,8 @@ defmodule ElixirEffects do
     effects =
       clauses
       |> Enum.map(fn
+        {:->, _, [[{:returned, _, [state_var, result_var]}], end_body]} ->
+          {nil, {[state_var, result_var], end_body}}
         {:->, _, [[eff], eff_body]} ->
           eff_type = get_effect_type_from_ast(eff)
           {eff_type, {[Macro.var(:state, nil), eff], eff_body}}
@@ -68,7 +79,9 @@ defmodule ElixirEffects do
           eff_type = get_effect_type_from_ast(eff)
           {eff_type, {[state_var, eff], eff_body}}
       end)
-      |> Enum.map(fn {eff_type, eff} ->
+      |> Enum.map(fn
+        {nil, _} = ef -> ef
+        {eff_type, eff} ->
           eff_type = __CALLER__.aliases[eff_type] || eff_type
           {eff_type, eff}
         end)
@@ -76,42 +89,51 @@ defmodule ElixirEffects do
 
     register_effects =
       effects
-      |> Enum.map(fn {eff_type, clauses} ->
-        clauses =
-          clauses
-          |> Enum.map(fn {[state_var, eff], eff_body} ->
-            quote generated: true do
-              (unquote(eff)) ->
-                [unquote(state_var) | rest_states] = Process.get(unquote(state_key))
-                _ = unquote(state_var)
-                case unquote(eff_body) do
-                  :done -> throw {:EffectsDone, unquote(state_key), nil}
-                  {:done, return_value} -> throw {:EffectsDone, unquote(state_key), return_value}
-                  {:throw, to_throw} -> throw to_throw
-                  {:raise, to_raise} -> raise to_raise
-                  {:return, return_value} -> return_value
-                  {:return, new_state, return_value} ->
-                    Process.put(unquote(state_key), [new_state | rest_states])
-                    return_value
-                  unhandled -> throw {:unhandled_effect_perform_return, unhandled}
-                end
-            end |> hd()
-          end)
-        fnast = {:fn, [], clauses}
-        quote do
-          Process.put(unquote(eff_type), [unquote(fnast) | Process.get(unquote(eff_type))])
-        end
+      |> Enum.map(fn
+        {nil, clauses} -> quote do end
+        {eff_type, clauses} ->
+          clauses =
+            clauses
+            |> Enum.map(fn {[state_var, eff], eff_body} ->
+              quote generated: true do
+                (unquote(eff)) ->
+                  [unquote(state_var) | rest_states] = Process.get(unquote(state_key))
+                  _ = unquote(state_var)
+                  case unquote(eff_body) do
+                    :done -> throw {:EffectsDone, unquote(state_key), nil}
+                    {:done, return_value} -> throw {:EffectsDone, unquote(state_key), return_value}
+                    {:throw, to_throw} -> throw to_throw
+                    {:raise, to_raise} -> raise to_raise
+                    {:return, return_value} -> return_value
+                    {:return, new_state, return_value} ->
+                      Process.put(unquote(state_key), [new_state | rest_states])
+                      return_value
+                    {:continue, cont} ->
+                      cont.()
+                    {:continue, new_state, cont} ->
+                      Process.put(unquote(state_key), [new_state | rest_states])
+                      cont.()
+                    unhandled -> throw {:unhandled_effect_perform_return, unhandled}
+                  end
+              end |> hd()
+            end)
+          fnast = {:fn, [], clauses}
+          quote do
+            Process.put(unquote(eff_type), [unquote(fnast) | Process.get(unquote(eff_type))])
+          end
       end)
 
     unregister_effects =
       effects
-      |> Enum.map(fn {eff_type, _clauses} ->
-        quote do
-          case Process.get(unquote(eff_type)) do
-            [_ | nil] -> Process.delete(unquote(eff_type))
-            [_ | previous] -> Process.put(unquote(eff_type), previous)
+      |> Enum.map(fn
+        {nil, _} -> quote do end
+        {eff_type, _clauses} ->
+          quote do
+            case Process.get(unquote(eff_type)) do
+              [_ | nil] -> Process.delete(unquote(eff_type))
+              [_ | previous] -> Process.put(unquote(eff_type), previous)
+            end
           end
-        end
       end)
 
     quote do
@@ -121,7 +143,10 @@ defmodule ElixirEffects do
         Process.put(unquote(state_key), [unquote(init) | Process.get(unquote(state_key))])
 
         # Run effect
-        unquote(expr)
+        result = unquote(expr)
+
+        # After run
+        # case
       catch
         {:EffectsDone, unquote(state_key), returned} -> returned
       after
